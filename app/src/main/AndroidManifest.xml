@@ -1,0 +1,629 @@
+package com.orangecash.app
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import java.text.SimpleDateFormat
+import java.util.*
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, 
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            }
+        }
+        
+        setContent {
+            OrangeCashApp()
+        }
+    }
+}
+
+@Composable
+fun OrangeCashApp() {
+    var currentScreen by remember { mutableStateOf("login") }
+    var walletNumber by remember { mutableStateOf("") }
+    var savedPassword by remember { mutableStateOf("") }
+    var transferAmount by remember { mutableStateOf("") }
+    var recipientNumber by remember { mutableStateOf("") }
+    var transactionId by remember { mutableStateOf("") }
+    var transactionDate by remember { mutableStateOf("") }
+    
+    val context = LocalContext.current
+    val notificationHelper = remember { NotificationHelper(context) }
+    
+    fun generateTransactionId(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return (1..16).map { chars.random() }.joinToString("")
+    }
+    
+    fun getCurrentDate(): String {
+        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale("ar"))
+        return sdf.format(Date())
+    }
+    
+    when (currentScreen) {
+        "login" -> LoginScreen(
+            onLogin = { number, password ->
+                walletNumber = number
+                savedPassword = password
+                currentScreen = "home"
+            }
+        )
+        "home" -> HomeScreen(
+            walletNumber = walletNumber,
+            onCheckBalance = { password ->
+                if (password == savedPassword) {
+                    // كشف الرصيد
+                }
+            },
+            onTransferClick = {
+                currentScreen = "transfer"
+            }
+        )
+        "transfer" -> TransferScreen(
+            onBack = { currentScreen = "home" },
+            onTransfer = { amount, recipient ->
+                transferAmount = amount
+                recipientNumber = recipient
+                currentScreen = "password"
+            }
+        )
+        "password" -> PasswordScreen(
+            savedPassword = savedPassword,
+            onBack = { currentScreen = "transfer" },
+            onSuccess = {
+                currentScreen = "loading"
+                transactionId = generateTransactionId()
+                transactionDate = getCurrentDate()
+                
+                Handler(Looper.getMainLooper()).postDelayed({
+                    notificationHelper.showTransferNotification(
+                        transferAmount,
+                        recipientNumber,
+                        "1.00"
+                    )
+                    currentScreen = "success"
+                }, 4000)
+            }
+        )
+        "loading" -> LoadingScreen()
+        "success" -> SuccessScreen(
+            onBack = { currentScreen = "home" },
+            amount = transferAmount,
+            recipient = recipientNumber,
+            transactionId = transactionId,
+            date = transactionDate
+        )
+    }
+}
+
+@Composable
+fun LoginScreen(onLogin: (String, String) -> Unit) {
+    var walletNumber by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Orange Cash",
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFF7900),
+            modifier = Modifier.padding(bottom = 48.dp)
+        )
+        
+        Text(
+            text = "تسجيل الدخول",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF222222),
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+        
+        OutlinedTextField(
+            value = walletNumber,
+            onValueChange = { walletNumber = it },
+            label = { Text("رقم المحفظة") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+        )
+        
+        Text(
+            text = "*يلزم تشغيل بيانات الهاتف",
+            fontSize = 12.sp,
+            color = Color(0xFF666666),
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        
+        PasswordDotsField(
+            password = password,
+            onPasswordChange = { password = it },
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+        
+        Button(
+            onClick = { onLogin(walletNumber, password) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFFF7900)
+            )
+        ) {
+            Text("بدأ", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(
+    walletNumber: String,
+    onCheckBalance: (String) -> Unit,
+    onTransferClick: () -> Unit
+) {
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0A192F))
+                .padding(24.dp)
+        ) {
+            Text(
+                text = "Orange Cash",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+        
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+        ) {
+            Text(
+                text = "مرحباً بك",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF222222),
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
+            
+            Button(
+                onClick = { showPasswordDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF7900)
+                )
+            ) {
+                Text("كشف الرصيد", fontSize = 16.sp, color = Color.White)
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                onClick = onTransferClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF7900)
+                )
+            ) {
+                Text("التحويل", fontSize = 16.sp, color = Color.White)
+            }
+        }
+    }
+    
+    if (showPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { showPasswordDialog = false },
+            title = { Text("أدخل كلمة المرور") },
+            text = {
+                PasswordDotsField(
+                    password = password,
+                    onPasswordChange = { password = it }
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onCheckBalance(password)
+                    showPasswordDialog = false
+                }) {
+                    Text("تم")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showPasswordDialog = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun TransferScreen(
+    onBack: () -> Unit,
+    onTransfer: (String, String) -> Unit
+) {
+    var recipientNumber by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0A192F))
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "رجوع",
+                    tint = Color.White
+                )
+            }
+            
+            Text(
+                text = "التحويل",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+        
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+        ) {
+            OutlinedTextField(
+                value = recipientNumber,
+                onValueChange = { recipientNumber = it },
+                label = { Text("تحويل إلى (رقم الهاتف)") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
+            
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it },
+                label = { Text("القيمة (من 1 إلى 60000)") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            
+            Button(
+                onClick = { onTransfer(amount, recipientNumber) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF7900)
+                ),
+                enabled = amount.isNotEmpty() && recipientNumber.isNotEmpty()
+            ) {
+                Text("التحويل", fontSize = 18.sp, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun PasswordScreen(
+    savedPassword: String,
+    onBack: () -> Unit,
+    onSuccess: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.Start)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = "رجوع",
+                tint = Color.Black
+            )
+        }
+        
+        Text(
+            text = "أدخل الرقم السري",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF222222),
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+        
+        PasswordDotsField(
+            password = password,
+            onPasswordChange = { password = it },
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+        
+        Button(
+            onClick = {
+                if (password == savedPassword) {
+                    onSuccess()
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFFF7900)
+            ),
+            enabled = password.length == 6
+        ) {
+            Text("تم", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun PasswordDotsField(
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(bottom = 8.dp)
+        ) {
+            repeat(6) { index ->
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .border(
+                            2.dp,
+                            if (index < password.length) Color(0xFFFF7900) else Color(0xFFE0E0E0),
+                            CircleShape
+                        )
+                        .background(
+                            if (index < password.length) Color(0xFFFF7900) else Color.White
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (index < password.length) {
+                        Text(
+                            text = "•",
+                            color = Color.White,
+                            fontSize = 24.sp
+                        )
+                    }
+                }
+            }
+        }
+        
+        Text(
+            text = "6 خانات فقط",
+            fontSize = 12.sp,
+            color = Color(0xFF666666)
+        )
+    }
+    
+    TextField(
+        value = password,
+        onValueChange = { 
+            if (it.length <= 6 && it.all { char -> char.isDigit() }) {
+                onPasswordChange(it)
+            }
+        },
+        modifier = Modifier.size(0.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        enabled = false
+    )
+}
+
+@Composable
+fun LoadingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFFFFFF)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            CircularProgressIndicator(
+                color = Color(0xFFFF7900),
+                modifier = Modifier.size(80.dp),
+                strokeWidth = 6.dp
+            )
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Text(
+                text = "جاري التحميل...",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF222222)
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "يرجى الانتظار",
+                fontSize = 14.sp,
+                color = Color(0xFF666666)
+            )
+        }
+    }
+}
+
+@Composable
+fun SuccessScreen(
+    onBack: () -> Unit,
+    amount: String,
+    recipient: String,
+    transactionId: String,
+    date: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A192F))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black)
+                    .align(Alignment.CenterEnd)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "رجوع",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+        
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(Color.White)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "نجاح",
+                    tint = Color(0xFF16A34A),
+                    modifier = Modifier.size(120.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = recipient,
+                            fontSize = 16.sp,
+                            color = Color(0xFF222222)
+                        )
+                        Text(
+                            text = "المستلم",
+                            fontSize = 14.sp,
+                            color = Color(0xFF666666)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
+                        .padding(16.dp)
+                
